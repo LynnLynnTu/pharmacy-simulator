@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>新藥建檔模擬系統（單檔版）</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <style>
+    body { 
+        min-height: 100vh; 
+        font-family: 'Noto Sans TC', sans-serif; /* 應用新字體 */
+    }
+    #fallback { display:none; padding:16px; color:#334155; }
+    .mono { font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace; }
+    
+    /* 專業表格標頭樣式 */
+    .order-table th {
+        background-color: #059669; /* emerald-600 */
+        color: white; 
+        font-weight: 500;
+    }
+    /* 強化輸入框的焦點效果 */
+    .focus-style:focus {
+        border-color: #059669; /* emerald-600 */
+        box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.2); /* 柔和的環形陰影 */
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+  <div id="root"></div>
+  <div id="fallback">
+    <h2 class="text-lg font-bold mb-2">頁面沒有顯示？</h2>
+    <ol class="list-decimal pl-6 space-y-1">
+      <li>請確認網路暢通（本頁需載入外部程式庫）。</li>
+      <li>若仍空白，請按 <span class="mono">F12</span> 開啟開發者工具 → Console 查看錯誤訊息。</li>
+      <li>或改用此連線版：將檔案上傳到 GitHub Pages / Netlify Drop。</li>
+    </ol>
+  </div>
+
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel" data-presets="env,react">
+    const { useState } = React;
+
+    // ================== 常用清單 & 對照 ==================
+    const unitList = [
+      "tab","cap","amp","vial","syrg","btl","patch","pen","pack","supp","tube","dose","U","IU","mcg","mg","g","mL","gtt","q.s."
+    ];
+    const unitLabel = {
+      tab:"錠", cap:"膠囊", amp:"安瓿", vial:"小瓶", syrg:"針筒", btl:"瓶", patch:"貼片", pen:"注射筆", pack:"包", supp:"栓劑", tube:"條", dose:"劑量", U:"單位", IU:"國際單位", mcg:"微克", mg:"毫克", g:"公克", mL:"毫升", gtt:"滴", "q.s.":"適量"
+    };
+    const routeList = ["PO","IVD","IVP","SC","IM","INHL","TOPI","RECT"];
+    const routeLabel = { PO:"口服", IVD:"靜脈滴注", IVP:"靜脈注射", SC:"皮下注射", IM:"肌肉注射", INHL:"吸入", TOPI:"外用", RECT:"肛門給藥" };
+    const attributeList = [
+      "腎功能管制量","肝功能管制量","抗微生物藥品","血液製劑藥品","不建議管灌","需洗腎後給藥","需附筆針針頭","需附針具","限CVC給藥","冷藏藥品","冷凍藥",
+      "血友病血液製劑","高風險曝觸藥品","標靶藥品(注射劑型)","標靶藥品(非注射劑型)","高警訊藥品","罕見疾病藥品","疫苗","Chemo藥品(5F化療室調劑)","泡製溶液時需使用Filter","滴注時需使用Filter"
+    ];
+    const reasonList = [
+      "持續釋放劑型","舌下劑型","腸溶劑型","內為液狀物","化學治療藥，不建議研磨","發泡錠劑型","口溶劑型","刺激黏膜","對眼睛具刺激性","具螯合作用會影響琺瑯質","易染色","可能會造成接觸性皮膚炎","增加吸收","易潮解","減低吸收","仿單建議整粒吞服","藥品為粉劑","管制藥品"
+    ];
+
+    // 頻次中文顯示（AC/PC 僅影響文案，不影響次數）
+    const freqLabel = {
+      QD:"每日一次", QDAC:"每日一次（飯前）", QDPC:"每日一次（飯後）",
+      BID:"每日兩次", BIDAC:"每日兩次（飯前）", BIDPC:"每日兩次（飯後）",
+      TID:"每日三次", TIDAC:"每日三次（飯前）", TIDPC:"每日三次（飯後）",
+      QID:"每日四次", QIDAC:"每日四次（飯前）", QIDPC:"每日四次（飯後）",
+      Q12H:"每12小時一次", Q8H:"每8小時一次", Q6H:"每6小時一次",
+      QW:"每週一次", Q2W:"每2週一次", Q3W:"每3週一次", Q4W:"每4週一次",
+      QM:"每月一次", Q2M:"每2月一次", Q3M:"每3月一次", Q6M:"每6月一次",
+      PRN:"必要時", STAT:"立即給藥", "AS ORDER":"遵醫囑"
+    };
+
+    // 每日平均次數（含週期頻次）
+    const freqCalc = {
+      QD:1, QDAC:1, QDPC:1,
+      BID:2, BIDAC:2, BIDPC:2,
+      TID:3, TIDAC:3, TIDPC:3,
+      QID:4, QIDAC:4, QIDPC:4,
+      Q12H:2, Q8H:3, Q6H:4,
+      QW:1/7, Q2W:1/14, Q3W:1/21, Q4W:1/28,
+      QM:1/30, Q2M:1/60, Q3M:1/90, Q6M:1/180,
+      PRN:1, STAT:1, "AS ORDER":1
+    };
+
+    const freqList = ["QD","QDAC","QDPC","BID","BIDAC","BIDPC","TID","TIDAC","TIDPC","QID","QIDAC","QIDPC","Q12H","Q8H","Q6H","AS ORDER","PRN","STAT","QW","Q2W","Q3W","Q4W","QM","Q2M","Q3M","Q6M"];
+
+    // ========= 換算工具 =========
+    function buildConversionMap(drug){
+      const map = {};
+      for(let i=0;i<4;i++){
+        const v = parseFloat(drug[`convertValue${i}`]);
+        const u = drug[`convertUnit${i}`];
+        if(!isNaN(v) && u){ map[u] = v; }
+      }
+      return map; 
+    }
+    
+    // 計算總量（無條件進位）
+    function calculateOrderQuantity(baseDose, freq, days, baseUnit, totalUnit, conversionMap){
+      const timesPerDay = freqCalc[freq] || 1;
+      // 核心計算公式：劑量 * 頻次/天 * 天數
+      const baseQty = (Number(baseDose) || 0) * timesPerDay * (Number(days) || 0); 
+      const canConvert = Boolean(conversionMap[baseUnit] && conversionMap[totalUnit]);
+      const convQtyRaw = canConvert ? baseQty * (conversionMap[totalUnit] / conversionMap[baseUnit]) : baseQty;
+      const orderQty = Math.ceil(convQtyRaw);
+      const orderUnit = canConvert ? totalUnit : baseUnit;
+      return { orderQty, orderUnit };
+    }
+
+    // ========= 小元件 =========
+    const SectionTitle = ({children}) => (
+      <div className="text-base font-semibold text-slate-700 mb-2 flex items-center gap-2 mt-4 border-b border-slate-200 pb-1">
+        <div className="h-3 w-1.5 rounded bg-emerald-600"></div>{children}
+      </div>
+    );
+    const Field = ({label, children}) => (
+      <label className="block"><div className="text-sm font-medium text-slate-700 mb-1">{label}</div>{children}</label>
+    );
+    const TextInput = (p) => <input {...p} className={"focus-style w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 " + (p.className||'')} />;
+    // 修正：type="number" 確保輸入的是數字，min="0"
+    const NumberInput = (p) => <input {...p} type="number" min="0" className={"focus-style w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/60 " + (p.className||'')} />;
+    const Select = ({value,onChange,children}) => (
+      <select value={value} onChange={onChange} className="focus-style w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/60 focus:border-emerald-500">{children}</select>
+    );
+
+    // ========= 藥袋預覽 =========
+    function BagPreview({ drug, orderQty, orderUnit, days }){
+      const routeZh = routeLabel[drug.route] || drug.route || '—';
+      const freqZh  = freqLabel[drug.freq] || drug.freq || '—';
+      const baseUnitZh  = unitLabel[drug.baseUnit] || drug.baseUnit;
+      const displayUnitZh = unitLabel[orderUnit] || orderUnit || baseUnitZh;
+      const doseTxt = drug.baseDose ? `每次 ${drug.baseDose} ${baseUnitZh||''}` : '';
+      const usage   = [routeZh, freqZh, doseTxt].filter(Boolean).join(' ');
+      return (
+        <section className="bg-white p-5 rounded-2xl shadow-xl ring-2 ring-emerald-200">
+          <div className="border-b-2 border-emerald-600 pb-1 mb-2"><div className="text-lg font-bold text-emerald-700">藥袋預覽</div></div>
+          <div className="font-bold text-base mb-1">學名：{drug.generic||'—'} {drug.specDesc||''}</div>
+          <div className="font-bold text-base mb-1">商品名：{drug.brandEn||'—'}（{drug.brandZh||'—'}）</div>
+          <div className="font-bold text-base mb-1">用法用量：{usage||'—'}</div>
+          <div className="font-bold text-base mb-1">藥品總量：共 {orderQty} {displayUnitZh} (共 {days} 天)</div>
+          <div className="font-bold text-base mb-1">治療用途：{drug.bagTherUse||'—'}</div>
+          <div className="font-bold text-base mb-1">副作用：{drug.bagADR||'—'}</div>
+          <div className="font-bold text-base mb-1">廠牌產地：{drug.mfg||'—'}（{drug.origin||'—'}）</div>
+          <div className="font-bold text-base mb-1">儲存方式：{drug.bagStorage||'—'}</div>
+        </section>
+      );
+    }
+
+    // ========= 主頁 =========
+    function App(){
+      const [drug, setDrug] = useState({
+        // 藥名
+        generic:"", specDesc:"", atc:"",
+        brandZh:"", brandEn:"", mfg:"", origin:"",
+        // 單位設定
+        baseDose:"", baseUnit:"", orderUnit:"", priceUnit:"", totalUnit:"", bagSubUnit:"",
+        // 劑量轉換（4 組）
+        convertValue0:"", convertUnit0:"", convertValue1:"", convertUnit1:"", convertValue2:"", convertUnit2:"", convertValue3:"", convertUnit3:"",
+        // 特殊限制
+        crush_forbid:false, unitdose_forbid:false, split_forbid:false, specialReason:"",
+        // 用法與頻次
+        route:"", freq:"",
+        // 屬性
+        attributes:[],
+        // 藥袋資料
+        bagTherUse:"", bagADR:"", bagStorage:""
+      });
+
+      // 將天數改為 state，初始值為 7 天
+      const [days, setDays] = useState(7); 
+      
+      const convMap = buildConversionMap(drug);
+      const { orderQty, orderUnit } = calculateOrderQuantity(
+        drug.baseDose, drug.freq, days, drug.baseUnit, drug.totalUnit, convMap
+      );
+      
+      return (
+        <div className="min-h-screen text-slate-800 bg-slate-50">
+          <header className="bg-emerald-600 px-4 py-4 flex justify-between items-center shadow-lg">
+            <div className="font-bold text-xl text-white">💊 新藥建檔模擬系統</div>
+          </header>
+
+          {/* 版面：左 = 藥品基本檔；右 = 上：醫囑，下：藥袋 (使用 lg:grid-cols-2 確保左右兩欄排版) */}
+          <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6 p-6">
+            {/* 左：藥品基本檔 */}
+            <section className="bg-white p-5 rounded-2xl shadow-lg ring-1 ring-slate-200 overflow-y-auto">
+              <div className="text-xl font-bold mb-4 text-emerald-700">藥品基本檔</div>
+
+              <SectionTitle>藥名</SectionTitle>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Field label="學名"><TextInput value={drug.generic} onChange={e=>setDrug({...drug,generic:e.target.value})}/></Field>
+                <Field label="中文商品名"><TextInput value={drug.brandZh} onChange={e=>setDrug({...drug,brandZh:e.target.value})}/></Field>
+                <Field label="英文商品名"><TextInput value={drug.brandEn} onChange={e=>setDrug({...drug,brandEn:e.target.value})}/></Field>
+                <Field label="ATC 代碼"><TextInput value={drug.atc} onChange={e=>setDrug({...drug,atc:e.target.value})}/></Field>
+                <Field label="製造廠名稱"><TextInput value={drug.mfg} onChange={e=>setDrug({...drug,mfg:e.target.value})}/></Field>
+                <Field label="產地"><TextInput value={drug.origin} onChange={e=>setDrug({...drug,origin:e.target.value})}/></Field>
+              </div>
+
+              <SectionTitle>規格含量</SectionTitle>
+              <Field label="規格含量描述"><TextInput value={drug.specDesc} onChange={e=>setDrug({...drug,specDesc:e.target.value})}/></Field>
+
+              <SectionTitle>單位設定</SectionTitle>
+              {/* 基本劑量與基本單位：同一行 */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <Field label="基本劑量">
+                  <NumberInput type="text" value={drug.baseDose} onChange={e=>setDrug({...drug,baseDose:e.target.value})}/>
+                </Field>
+                <Field label="基本單位">
+                  <Select value={drug.baseUnit} onChange={e=>setDrug({...drug,baseUnit:e.target.value})}>
+                    <option value="">選擇</option>
+                    {unitList.map(u => <option key={u}>{u}</option>)}
+                  </Select>
+                </Field>
+              </div>
+              {/* 其他單位：同一行四欄 */}
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <Field label="醫囑單位">
+                  <Select value={drug.orderUnit} onChange={e=>setDrug({...drug,orderUnit:e.target.value})}>
+                    <option value="">選擇</option>
+                    {unitList.map(u => <option key={u}>{u}</option>)}
+                  </Select>
+                </Field>
+                <Field label="計價單位">
+                  <Select value={drug.priceUnit} onChange={e=>setDrug({...drug,priceUnit:e.target.value})}>
+                    <option value="">選擇</option>
+                    {unitList.map(u => <option key={u}>{u}</option>)}
+                  </Select>
+                </Field>
+                <Field label="給藥總量單位">
+                  <Select value={drug.totalUnit} onChange={e=>setDrug({...drug,totalUnit:e.target.value})}>
+                    <option value="">選擇</option>
+                    {unitList.map(u => <option key={u}>{u}</option>)}
+                  </Select>
+                </Field>
+                <Field label="藥袋次量單位">
+                  <Select value={drug.bagSubUnit} onChange={e=>setDrug({...drug,bagSubUnit:e.target.value})}>
+                    <option value="">選擇</option>
+                    {unitList.map(u => <option key={u}>{u}</option>)}
+                  </Select>
+                </Field>
+              </div>
+
+              <SectionTitle>劑量轉換係數</SectionTitle>
+              <div className="grid grid-cols-4 gap-2 mb-4">
+                {[0,1,2,3].map(i => (
+                  <div key={i} className="flex gap-2 items-center">
+                    <NumberInput type="text" value={drug[`convertValue${i}`] || ''} onChange={e=>setDrug({...drug,[`convertValue${i}`]:e.target.value})}/>
+                    <Select value={drug[`convertUnit${i}`] || ''} onChange={e=>setDrug({...drug,[`convertUnit${i}`]:e.target.value})}>
+                      <option value="">選擇單位</option>
+                      {unitList.map(u => (<option key={u}>{u}</option>))}
+                    </Select>
+                  </div>
+                ))}
+                <div className="text-xs text-slate-500 col-span-4">例：1 btl = 10 mL = 200 gtt（請依左到右填入 2–4 組）</div>
+              </div>
+
+              <SectionTitle>口服藥品特殊劑型限制</SectionTitle>
+              <div className="flex flex-col md:flex-row gap-4 text-sm items-start">
+                <div className="flex flex-col gap-2 w-40">
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={drug.crush_forbid} onChange={e=>setDrug({...drug,crush_forbid:e.target.checked})}/>不可磨粉</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={drug.unitdose_forbid} onChange={e=>setDrug({...drug,unitdose_forbid:e.target.checked})}/>不可分包</label>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={drug.split_forbid} onChange={e=>setDrug({...drug,split_forbid:e.target.checked})}/>不可剝</label>
+                </div>
+                <div className="flex-1">
+                  <Field label="原因">
+                    <Select value={drug.specialReason||''} onChange={e=>setDrug({...drug,specialReason:e.target.value})}>
+                      <option value="">選擇原因</option>
+                      {reasonList.map(r => (<option key={r}>{r}</option>))}
+                    </Select>
+                  </Field>
+                </div>
+              </div>
+
+              <SectionTitle>用法、頻次與天數</SectionTitle>
+              {/* 天數輸入框修正為與途徑/頻次排版在同一列 */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Field label="給藥途徑"><Select value={drug.route} onChange={e=>setDrug({...drug,route:e.target.value})}><option value="">選擇</option>{routeList.map(r => (<option key={r}>{r}</option>))}</Select></Field>
+                <Field label="給藥頻次"><Select value={drug.freq} onChange={e=>setDrug({...drug,freq:e.target.value})}><option value="">選擇</option>{Object.keys(freqCalc).map(f => (<option key={f}>{f}</option>))}</Select></Field>
+                <Field label="天數">
+                    <NumberInput 
+                        value={days} 
+                        onChange={e => setDays(Number(e.target.value))} 
+                        placeholder="請輸入天數"
+                    />
+                </Field>
+              </div>
+
+              <SectionTitle>屬性</SectionTitle>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-sm">
+                {attributeList.map(attr => (
+                  <label key={attr} className="flex items-center gap-2">
+                    <input type="checkbox" checked={drug.attributes?.includes(attr)} onChange={()=>{
+                      const set = new Set(drug.attributes||[]);
+                      set.has(attr) ? set.delete(attr) : set.add(attr);
+                      setDrug({...drug, attributes:[...set]});
+                    }}/> {attr}
+                  </label>
+                ))}
+              </div>
+
+              <SectionTitle>藥袋資料</SectionTitle>
+              <div className="grid gap-4">
+                <Field label="治療用途"><TextInput value={drug.bagTherUse} onChange={e=>setDrug({...drug,bagTherUse:e.target.value})}/></Field>
+                <Field label="副作用內容"><TextInput value={drug.bagADR} onChange={e=>setDrug({...drug,bagADR:e.target.value})}/></Field>
+                <Field label="儲存方式"><TextInput value={drug.bagStorage} onChange={e=>setDrug({...drug,bagStorage:e.target.value})}/></Field>
+              </div>
+            </section>
+
+            {/* 右欄：上→醫囑開立畫面；下→藥袋預覽 */}
+            <div className="flex flex-col gap-6">
+              {/* 醫囑開立畫面 */}
+              <section className="bg-white p-5 rounded-2xl shadow-lg ring-1 ring-emerald-300">
+                <div className="text-lg font-bold mb-2 text-slate-700">醫囑開立畫面</div>
+                <div className="border border-slate-200 rounded-xl overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="order-table sticky top-0 z-10">
+                      <tr>
+                        <th className="p-2 text-left">藥名</th>
+                        <th className="p-2 text-left">劑量</th>
+                        <th className="p-2 text-left">途徑</th>
+                        <th className="p-2 text-left">頻次</th>
+                        <th className="p-2 text-left">天數</th>
+                        <th className="p-2 text-left">總量</th>
+                        <th className="p-2 text-left">提醒</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      <tr className="odd:bg-white even:bg-slate-50 hover:bg-emerald-50/40 transition-colors">
+                        <td className="p-2">{[drug.generic, drug.specDesc].filter(Boolean).join(' ') || '—'}</td>
+                        <td className="p-2">{drug.baseDose || '—'} {unitLabel[drug.baseUnit] || drug.baseUnit || ''}</td>
+                        <td className="p-2">{drug.route || '—'}</td>
+                        <td className="p-2">{drug.freq || '—'}</td>
+                        <td className="p-2 font-bold text-lg">{days} 天</td> 
+                        <td className="p-2 font-bold text-lg text-emerald-700">{orderQty} {unitLabel[orderUnit] || orderUnit || ''}</td> 
+                        <td className="p-2 text-xs text-red-600 font-medium">
+                          {(drug.crush_forbid || drug.unitdose_forbid || drug.split_forbid || drug.specialReason)
+                            ? [
+                                drug.crush_forbid ? '不可磨粉' : '',
+                                drug.unitdose_forbid ? '不可分包' : '',
+                                drug.split_forbid ? '不可剝' : '',
+                                drug.specialReason ? `${drug.specialReason}` : ''
+                              ].filter(Boolean).join(' ')
+                            : ''}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              {/* 藥袋預覽 */}
+              <BagPreview drug={drug} orderQty={orderQty} orderUnit={orderUnit} days={days} />
+            </div>
+          </main>
+        </div>
+      );
+    }
+
+    // 掛載 React 應用
+    try {
+      ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    } catch (e) {
+      document.getElementById('fallback').style.display = 'block';
+      console.error(e);
+    }
+  </script>
+</body>
+</html>
